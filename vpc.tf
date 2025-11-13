@@ -1,0 +1,25 @@
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = ">=6.5.0"
+
+  name = lower(join("-", [local.short_name, "vpc"]))
+  cidr = local.cidr
+  azs  = local.availability_zones
+
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  # Simple subnet configuration for GitHub runners
+  private_subnets = [for k, v in local.availability_zones : cidrsubnet(local.cidr, 8, k)]
+  public_subnets  = [for k, v in local.availability_zones : cidrsubnet(local.cidr, 8, k + 4)]
+
+  # Single NAT gateway for cost efficiency
+  enable_nat_gateway = true
+  single_nat_gateway = true
+
+  tags = {
+    Name  = lower(join("-", [local.short_name, "vpc"]))
+    Owner = "Terraform"
+    team  = "Devops:blue-samarth"
+  }
+}
