@@ -14,7 +14,7 @@ on:
 
 jobs:
     test-runners:
-        runs-on: gha-runner-scale-set
+        runs-on: [self-hosted, gha-runner-scale-set]
         steps:
         - name: Check Runner
           run: echo "Runner is working fine!"
