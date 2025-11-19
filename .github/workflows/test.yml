@@ -1,0 +1,28 @@
+# Will test the Craeted RUnners in the cluster
+name: Test GitHub Actions Runners
+
+on:
+  push:
+    branches:
+      - main
+      - init-runner
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+jobs:
+    test-runners:
+        runs-on: gha-runner-scale-set
+        steps:
+        - name: Check Runner
+          run: echo "Runner is working fine!"
+
+        - name: Check kubectl access
+          run: kubectl get pods -A
+
+        - name: Run tests
+          run: |
+            echo "Running tests..."
+

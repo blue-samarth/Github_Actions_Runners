@@ -50,3 +50,5 @@ terraform.rc.json
 # GitHub Actions runner caches and workspace files (if any)
 # Recommended to ignore runner work directories if present
 # .runner-work/
+*lock*
+*.pem
