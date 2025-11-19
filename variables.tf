@@ -13,7 +13,10 @@ variable "availability_zones" { default = null }
 variable "short_name" { default = null }
 variable "github_app_id" { default = null }
 variable "github_app_installation_id" { default = null }
-variable "github_app_private_key" { default = null }
+variable "github_app_private_key" {
+  default   = null
+  sensitive = true
+}
 variable "github_app_private_key_path" { default = null }
 variable "Sync_period_in_minutes" { default = null }
 

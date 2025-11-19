@@ -14,13 +14,19 @@ module "eks_cluster" {
 
   addons = {
     coredns = {
-      most_recent = true
+      before_compute    = true
+      most_recent       = true
+      resolve_conflicts = "OVERWRITE"
     }
-    kube-proxy = {
-      most_recent = true
+    eks-pod-identity-agent = {
+      before_compute = true
+      most_recent    = true
     }
+    kube-proxy = {}
     vpc-cni = {
-      most_recent = true
+      before_compute    = true
+      most_recent       = true
+      resolve_conflicts = "OVERWRITE"
     }
   }
 
@@ -30,7 +36,7 @@ module "eks_cluster" {
   eks_managed_node_groups = {
     runners = {
       ami_type       = "AL2023_x86_64_STANDARD"
-      instance_types = ["t3.small"]
+      instance_types = ["t3.medium"]
 
       min_size     = local.min_runner_replicas
       max_size     = local.max_runner_replicas
@@ -40,8 +46,9 @@ module "eks_cluster" {
         max_unavailable_percentage = 33
       }
 
-      # Fix circular dependency by providing explicit values
-    #   iam_role_use_name_prefix = false
+      iam_role_additional_policies = {
+        SSMCore = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      }
     }
   }
 
@@ -53,5 +60,5 @@ module "eks_cluster" {
 }
 
 data "aws_eks_cluster_auth" "cluster" {
-  name = module.eks_cluster.cluster_id
+  name = module.eks_cluster.cluster_name
 }

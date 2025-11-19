@@ -26,16 +26,30 @@ locals {
   runner_image                 = coalesce(var.runner_image, "myoung34/github-runner:latest")
   runner_labels                = coalesce(var.runner_labels, ["self-hosted", "linux", "x64", "k8s"])
   min_runner_replicas          = coalesce(var.min_runner_replicas, 1)
-  max_runner_replicas          = coalesce(var.max_runner_replicas, 10)
+  max_runner_replicas          = coalesce(var.max_runner_replicas, 5)
   desired_size_runner_replicas = coalesce(var.desired_size_runner_replicas, 2)
 
   runner_deployment_resources_limits_cpu      = coalesce(var.runner_deployment_resources_limits_cpu, "1000m")
-  runner_deployment_resources_limits_memory   = coalesce(var.runner_deployment_resources_limits_memory, "1024Mi")
+  runner_deployment_resources_limits_memory   = coalesce(var.runner_deployment_resources_limits_memory, "2Gi")
   runner_deployment_resources_requests_cpu    = coalesce(var.runner_deployment_resources_requests_cpu, "500m")
-  runner_deployment_resources_requests_memory = coalesce(var.runner_deployment_resources_requests_memory, "512Mi")
+  runner_deployment_resources_requests_memory = coalesce(var.runner_deployment_resources_requests_memory, "1Gi")
 
   runner_autoscaler_scale_up_threshold   = coalesce(var.runner_autoscaler_scale_up_threshold, "0.75")
   runner_autoscaler_scale_down_threshold = coalesce(var.runner_autoscaler_scale_down_threshold, "0.25")
   runner_autoscaler_scale_up_factor      = coalesce(var.runner_autoscaler_scale_up_factor, "2")
   runner_autoscaler_scale_down_factor    = coalesce(var.runner_autoscaler_scale_down_factor, "0.5")
 }
+
+# output "debug_github_app_key_length" {
+#   value     = length(local.github_app_private_key)
+#   sensitive = false
+# }
+
+# output "debug_github_app_key_source" {
+#   value = var.github_app_private_key != null ? "from_variable" : (
+#     var.github_app_private_key_path != null && fileexists(var.github_app_private_key_path) ? "from_file_path" :
+#     fileexists("./github-app-private-key.pem") ? "from_default_path" :
+#     "NONE - KEY IS EMPTY!"
+#   )
+#   sensitive = false
+# }

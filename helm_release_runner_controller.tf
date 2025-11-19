@@ -1,58 +1,99 @@
-# Install Actions Runner Controller in arc-runners namespace
-resource "helm_release" "actions_runner_controller" {
-  name             = lower(join("-", [local.short_name, "actions", "runner", "controller"]))
-  repository       = "https://actions-runner-controller.github.io/actions-runner-controller"
-  chart            = "actions-runner-controller"
-  version          = "0.23.7"
+resource "helm_release" "arc_controller" {
+  name             = lower(join("-", [local.short_name, "arc", "controller"]))
+  repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
+  chart            = "gha-runner-scale-set-controller"
+  version          = "0.12.0"
+  namespace        = "arc-runners"
+  create_namespace = true
+
+  wait    = true
+  timeout = 600
+
+  depends_on = [module.eks_cluster]
+}
+
+resource "helm_release" "arc_runner_scale_set" {
+  name             = lower(join("-", [local.short_name, "scale", "set"]))
+  repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
+  chart            = "gha-runner-scale-set"
+  version          = "0.12.0"
   namespace        = kubernetes_namespace_v1.namespace_arc_runners.metadata[0].name
   create_namespace = false
 
   set = [
     {
-      name  = "syncPeriod"
-      value = local.Sync_period_in_minutes
+      name  = "githubConfigUrl"
+      value = "https://github.com/${local.github_repository}"
     },
     {
-      name  = "authSecret.enabled"
-      value = "true"
+      name  = "template.spec.containers[0].name"
+      value = "runner"
     },
+
     {
-      name  = "authSecret.name"
-      value = kubernetes_secret_v1.github_app_credentials.metadata[0].name
-    },
-    {
-      name  = "githubAppID"
+      name  = "githubConfigSecret.github_app_id"
       value = local.github_app_id
     },
     {
-      name  = "githubAppInstallationID"
+      name  = "githubConfigSecret.github_app_installation_id"
       value = local.github_app_installation_id
     },
     {
-      name  = "resources.limits.cpu"
+      name  = "githubConfigSecret.github_app_private_key"
+      value = local.github_app_private_key
+    },
+    # Scaling Configuration
+    {
+      name  = "minRunners"
+      value = local.min_runner_replicas
+    },
+
+    {
+      name  = "maxRunners"
+      value = local.max_runner_replicas
+    },
+
+    # Runner Container Configuration
+    {
+      name  = "template.spec.containers[0].image"
+      value = "ghcr.io/actions/actions-runner:latest"
+    },
+
+    {
+      name  = "template.spec.containers[0].resources.limits.cpu"
       value = local.runner_controller_resources_limits_cpu
     },
+
     {
-      name  = "resources.limits.memory"
+      name  = "template.spec.containers[0].resources.limits.memory"
       value = local.runner_controller_resources_limits_memory
     },
+
     {
-      name  = "resources.requests.cpu"
+      name  = "template.spec.containers[0].resources.requests.cpu"
       value = local.runner_controller_resources_requests_cpu
     },
-    {
-      name  = "resources.requests.memory"
-      value = local.runner_controller_resources_requests_memory
-    }
-  ]
 
-  # Wait for deployment to be ready
-  wait          = true
-  wait_for_jobs = true
-  timeout       = 600
+    {
+      name  = "template.spec.containers[0].resources.requests.memory"
+      value = local.runner_controller_resources_requests_memory
+    },
+
+    # Docker-in-Docker Mode
+    {
+      name  = "containerMode.type"
+      value = "dind"
+    },
+    {
+      name  = "runnerScaleSetListener.enabled"
+      value = "true"
+    },
+  ]
+  wait    = true
+  timeout = 600
 
   depends_on = [
-    kubernetes_secret_v1.github_app_credentials,
-    helm_release.cert_manager
+    helm_release.arc_controller,
+    kubernetes_namespace_v1.namespace_arc_runners
   ]
 }
