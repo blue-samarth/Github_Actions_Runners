@@ -35,6 +35,7 @@ one alone encodes days of debugging.
    - [7.2 Create & install the GitHub App](#72-create--install-the-github-app)
    - [7.3 Example github.auto.tfvars](#73-example-githubautotfvars)
 8. [Deployment runbook](#8-deployment-runbook)
+   - [8.1 Teardown (and the Karpenter-orphan gotcha)](#81-teardown-and-the-karpenter-orphan-gotcha)
 9. [Testing autoscaling](#9-testing-autoscaling)
 10. [Cost optimization (the full model)](#10-cost-optimization-the-full-model)
 11. [Observability & operations](#11-observability--operations)
@@ -591,6 +592,66 @@ git add .github/workflows/ && git commit -m "ci: self-hosted runners" && git pus
 > **Order matters for first apply:** the EKS control plane takes ~10–15 min; the `exec` provider
 > auth handles token freshness so the namespace/Helm/Karpenter resources apply afterward without
 > the `Unauthorized` error described in Challenge #2.
+
+### 8.1 Teardown (and the Karpenter-orphan gotcha)
+
+`terraform destroy` works, but there's one trap: **Karpenter-launched nodes are not in Terraform
+state** — Karpenter creates them dynamically from pending pods. A naive destroy removes the
+Karpenter *controller* but leaves its EC2 nodes running. Those orphans then block VPC/subnet/SG
+deletion (`DependencyViolation`) and the Spot SLR deletion (`Open or Active spot instance requests
+found`).
+
+**Clean teardown — drain Karpenter first, then destroy:**
+
+```bash
+# 1) Make Karpenter scale its nodes to zero
+kubectl delete nodepool --all
+kubectl delete nodeclaim --all          # remove any stragglers
+kubectl get nodes -w                    # wait until only the system base nodes remain
+
+# 2) Destroy
+terraform destroy
+```
+
+(Equivalently: set `min_runner_replicas = 0` / `max_runner_replicas = 0`, let consolidation drain
+the runner nodes, then destroy.)
+
+**If you already destroyed and hit orphans**, terminate the leftover Karpenter instances by tag and
+re-run — terminating one-time Spot instances also closes their Spot requests:
+
+```bash
+aws ec2 describe-instances --region ap-south-1 \
+  --filters "Name=tag-key,Values=karpenter.sh/nodepool" \
+            "Name=instance-state-name,Values=running,pending,stopping,stopped" \
+  --query 'Reservations[].Instances[].InstanceId' --output text \
+| xargs -r aws ec2 terminate-instances --region ap-south-1 --instance-ids
+terraform destroy
+```
+
+**Provider-connectivity escape hatch.** If `destroy` fails because the Kubernetes providers can't
+reach the cluster API (e.g., `dial tcp ... i/o timeout` on the EKS endpoint — a VPN/network path
+issue), you don't need the cluster API to tear down AWS infra. In-cluster objects die with the
+cluster, so drop them from state and destroy with AWS APIs only:
+
+```bash
+terraform state rm \
+  helm_release.arc_controller helm_release.arc_runner_scale_set \
+  helm_release.karpenter helm_release.karpenter_crd \
+  kubectl_manifest.karpenter_node_class kubectl_manifest.karpenter_node_pool \
+  kubernetes_namespace_v1.namespace_arc_runners kubernetes_namespace_v1.namespace_arc_systems
+terraform destroy
+```
+
+**Always confirm no billable leftovers** (NAT gateways + EIPs bill until gone — don't leave a
+half-finished destroy):
+
+```bash
+aws ec2 describe-nat-gateways --region ap-south-1 --filter Name=state,Values=available --query 'NatGateways[].NatGatewayId'
+aws ec2 describe-addresses    --region ap-south-1 --query 'Addresses[].AllocationId'
+aws ec2 describe-instances    --region ap-south-1 --filters Name=instance-state-name,Values=running --query 'Reservations[].Instances[].InstanceId'
+```
+
+All three should return empty.
 
 ---
 
