@@ -22,9 +22,6 @@ locals {
   runner_controller_resources_requests_cpu    = coalesce(var.runner_controller_resources_requests_cpu, "250m")
   runner_controller_resources_requests_memory = coalesce(var.runner_controller_resources_requests_memory, "256Mi")
 
-  # Use :latest — GitHub force-rejects deprecated runner versions ("cannot receive
-  # messages", HTTP 403), and ARC runs with DisableUpdate=true so the runner can't
-  # self-update. A stale pin will break; override var.runner_image only with a CURRENT tag.
   runner_image        = coalesce(var.runner_image, "ghcr.io/actions/actions-runner:latest")
   min_runner_replicas = coalesce(var.min_runner_replicas, 1)
   max_runner_replicas = coalesce(var.max_runner_replicas, 5)

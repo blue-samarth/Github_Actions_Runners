@@ -49,7 +49,7 @@ module "eks_cluster" {
       max_size     = local.system_node_max_size
       desired_size = local.system_node_desired_size
 
-      labels = {  workload = "system"  }
+      labels = { workload = "system" }
 
       taints = {
         system = {
@@ -59,8 +59,8 @@ module "eks_cluster" {
         }
       }
 
-      update_config = {  max_unavailable_percentage = 33  }
-      iam_role_additional_policies = {  SSMCore = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"  }
+      update_config                = { max_unavailable_percentage = 33 }
+      iam_role_additional_policies = { SSMCore = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore" }
     }
   }
 

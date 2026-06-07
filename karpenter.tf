@@ -1,7 +1,7 @@
 resource "aws_iam_service_linked_role" "spot" { aws_service_name = "spot.amazonaws.com" }
 data "http" "karpenter_latest_release" {
-  url = "https://api.github.com/repos/aws/karpenter-provider-aws/releases/latest"
-  request_headers = { Accept = "application/vnd.github+json"  }
+  url             = "https://api.github.com/repos/aws/karpenter-provider-aws/releases/latest"
+  request_headers = { Accept = "application/vnd.github+json" }
 }
 module "karpenter" {
   source  = "terraform-aws-modules/eks/aws//modules/karpenter"
