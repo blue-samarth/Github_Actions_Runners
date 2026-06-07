@@ -30,7 +30,10 @@ one alone encodes days of debugging.
 4. [Lifecycle of a job (end-to-end)](#4-lifecycle-of-a-job-end-to-end)
 5. [Repository layout & file-by-file walkthrough](#5-repository-layout--file-by-file-walkthrough)
 6. [Configuration reference](#6-configuration-reference)
-7. [Prerequisites](#7-prerequisites)
+7. [Getting started](#7-getting-started)
+   - [7.1 Prerequisites](#71-prerequisites)
+   - [7.2 Create & install the GitHub App](#72-create--install-the-github-app)
+   - [7.3 Example github.auto.tfvars](#73-example-githubautotfvars)
 8. [Deployment runbook](#8-deployment-runbook)
 9. [Testing autoscaling](#9-testing-autoscaling)
 10. [Cost optimization (the full model)](#10-cost-optimization-the-full-model)
@@ -373,13 +376,15 @@ image (#8).
 ├── locals.tf                           # all defaults via coalesce()
 ├── variables.tf                        # all inputs (default = null)
 ├── github.auto.tfvars                  # LOCAL, git-ignored overrides (App IDs, key path, runner counts)
-├── .github/workflows/
-│   ├── test.yml                        # smoke test (runs-on: gha-runner-scale-set)
-│   └── scale-test.yml                  # 10-way matrix load test
-├── establish_local_connection.sh       # write kubeconfig for this cluster
-├── validate_script.sh                  # verify the GitHub App secret in-cluster
-└── wtf.sh                              # end-to-end deployment health check
+└── .github/workflows/
+    ├── test.yml                        # smoke test (runs-on: gha-runner-scale-set)
+    └── scale-test.yml                  # 10-way matrix load test
 ```
+
+> **Local-only (git-ignored, not committed):** `establish_local_connection.sh` (kubeconfig
+> helper), `validate_script.sh` (verifies the in-cluster App secret), and `wtf.sh` (health
+> check) — documented in [§15](#15-helper-scripts). Keep them locally; nothing in the Terraform
+> flow depends on them.
 
 **`versions.tf`** — pins Terraform ≥ 1.13 and all providers; configures `aws`, and the three K8s
 providers (`kubernetes`, `helm`, `kubectl`) with `exec` auth, plus `http`.
@@ -456,15 +461,96 @@ IAM/queue module, the CRD + controller Helm releases (with nodeSelector/tolerati
 
 ---
 
-## 7. Prerequisites
+## 7. Getting started
 
-- **Terraform** ≥ 1.13, **AWS CLI v2** (authenticated), **kubectl**, **helm**.
-- A **GitHub App** installed on the target repo with **Administration: R/W**, **Metadata: R**,
-  **Actions: R**; note App ID + Installation ID and download the `.pem`.
-- AWS account with quota for EKS, NAT, and on-demand **+ Spot** EC2.
-- The **EC2 Spot service-linked role** — created by this stack (`aws_iam_service_linked_role.spot`),
-  but if it already exists account-wide, `terraform import` it instead.
+The full path from nothing to a working runner fleet. Do **7.1–7.3** once, then run the
+[Deployment runbook](#8-deployment-runbook).
+
+### 7.1 Prerequisites
+
+- **Terraform** ≥ 1.13, **AWS CLI v2** (authenticated to the target account), **kubectl**, **helm**.
+- An AWS account with quota for EKS, NAT, and on-demand **+ Spot** EC2.
+- Permission to create the **EC2 Spot service-linked role** (this stack creates it; if it already
+  exists account-wide, run `terraform import aws_iam_service_linked_role.spot <role-arn>` instead).
 - **Do not** run Terraform as the account root user — use a scoped IAM principal.
+
+### 7.2 Create & install the GitHub App
+
+Runners authenticate as a **GitHub App installation** (more secure and higher API rate limits than
+a PAT). GitHub has **no API to create an App non-interactively**, so this part is one-time and
+manual. You'll come away with three values + a private key file.
+
+1. Go to **GitHub → Settings → Developer settings → GitHub Apps → New GitHub App**
+   (for an org: **Org Settings → Developer settings → GitHub Apps**).
+2. **GitHub App name:** anything unique (e.g., `my-eks-runners`). **Homepage URL:** your repo URL.
+3. **Webhook:** **uncheck "Active"** — ARC doesn't need webhooks.
+4. **Permissions** — grant the minimum ARC requires:
+   - *For repository-level runners* — **Repository permissions:**
+     - **Administration → Read and write**  (register / remove runners)
+     - **Metadata → Read-only**  (auto-selected)
+     - **Actions → Read-only**
+   - *For organization-level runners* — additionally **Organization permissions → Self-hosted
+     runners → Read and write**.
+5. **Where can this app be installed:** *Only on this account*.
+6. Click **Create GitHub App**.
+7. On the App's **General** page, copy the **App ID** (e.g., `2282659`) → this is `github_app_id`.
+8. Still on **General → Private keys → Generate a private key**. A `.pem` downloads — this is your
+   `github_app_private_key_path`. Keep it safe; it's a credential.
+9. Left sidebar → **Install App** → **Install** on your account → choose **Only select
+   repositories**, pick the repo(s) the runners will serve → **Install**.
+10. After installing, the browser URL is
+    `https://github.com/settings/installations/<INSTALLATION_ID>` — that number is your
+    `github_app_installation_id` (e.g., `94439212`). (Findable later via the App → *Install App* →
+    **Configure**.)
+
+Put the `.pem` somewhere this repo can read it (the repo root is simplest) and reference it by path
+in tfvars (next step).
+
+### 7.3 Example `github.auto.tfvars`
+
+Create **`github.auto.tfvars`** in the repo root. It is **git-ignored** and **auto-loaded** by
+Terraform — so your secrets are never committed and you never pass `-var-file`. Only the four GitHub
+values are **required**; everything else has a sensible default in `locals.tf` and is shown
+commented for reference.
+
+```hcl
+# ── REQUIRED: GitHub App identity (from step 7.2) ───────────────────────────
+github_repository           = "your-org/your-repo"                 # repo the runners serve
+github_app_id               = "2282659"                            # App → General → App ID
+github_app_installation_id  = "94439212"                           # from the install URL
+github_app_private_key_path = "./my-eks-runners.private-key.pem"   # the downloaded .pem
+
+# ── OPTIONAL: runner scaling (defaults: min 1, max 5) ───────────────────────
+min_runner_replicas = 0      # 0 = scale to zero when idle (cheapest)
+max_runner_replicas = 10     # hard cap on concurrent runners
+
+# ── OPTIONAL: region / naming (defaults shown) ──────────────────────────────
+# region     = "ap-south-1"
+# short_name = "gha-runner"   # cluster name becomes "<short_name>-eks"
+
+# ── OPTIONAL: Karpenter / cost knobs (defaults shown) ───────────────────────
+# karpenter_capacity_types      = ["spot", "on-demand"]   # spot-first, on-demand fallback
+# karpenter_node_instance_types = ["t3.medium", "t3.large", "t3.xlarge", "t3a.medium", "t3a.large", "t3a.xlarge"]
+# karpenter_cpu_limit           = "100"                   # NodePool total vCPU cap
+# karpenter_version             = null                    # null = latest release (resolved dynamically)
+
+# ── OPTIONAL: system/base node group (defaults shown) ───────────────────────
+# system_node_instance_types = ["t3.medium"]
+# system_node_min_size       = 1
+# system_node_desired_size   = 2
+# system_node_max_size       = 2
+
+# ── OPTIONAL: per-runner pod resources (defaults shown) ─────────────────────
+# runner_deployment_resources_requests_cpu    = "500m"
+# runner_deployment_resources_requests_memory = "1Gi"
+# runner_deployment_resources_limits_cpu      = "1000m"
+# runner_deployment_resources_limits_memory   = "2Gi"
+```
+
+> **Alternative to a key file:** set `github_app_private_key` (the PEM *contents*) instead of
+> `github_app_private_key_path`. Either way it stays in the git-ignored tfvars and out of version
+> control. For stronger isolation see the secret-hardening options in
+> [Future improvements](#18-future-improvements).
 
 ---
 
@@ -492,11 +578,11 @@ terraform apply
 
 # 4) Kubeconfig
 aws eks update-kubeconfig --name gha-runner-eks --region ap-south-1 --alias gha-runner-eks
-# or: bash establish_local_connection.sh
 
-# 5) Verify
-bash wtf.sh             # controller/listener/runner health + events
-bash validate_script.sh # GitHub App secret is present & the key is a valid PEM
+# 5) Verify the control plane is healthy
+kubectl get pods -n arc-systems                    # controller + listener should be Running
+kubectl get autoscalingrunnerset -n arc-runners    # the scale set should exist
+kubectl logs -n arc-systems -l app.kubernetes.io/component=runner-scale-set-listener --tail=5 | grep statistics
 
 # 6) Push the workflow so GitHub runs the correct runs-on (see Challenge #6)
 git add .github/workflows/ && git commit -m "ci: self-hosted runners" && git push
@@ -764,6 +850,10 @@ used" — always confirm `capacity-type=spot` on actual nodes.
 ---
 
 ## 15. Helper scripts
+
+> **Local-only & git-ignored — not committed to the repo** (they can hold account-specific values
+> like the AWS account ID). They're optional convenience tools; nothing in the Terraform flow
+> depends on them. Recreate them locally if you want them.
 
 - **`establish_local_connection.sh`** — resets stale contexts and writes a fresh kubeconfig
   (`aws eks update-kubeconfig`) aliased to the cluster.
