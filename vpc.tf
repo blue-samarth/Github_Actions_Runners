@@ -9,17 +9,13 @@ module "vpc" {
   enable_dns_hostnames = true
   enable_dns_support   = true
 
-  # Simple subnet configuration for GitHub runners
   private_subnets = [for k, v in local.availability_zones : cidrsubnet(local.cidr, 8, k)]
   public_subnets  = [for k, v in local.availability_zones : cidrsubnet(local.cidr, 8, k + 4)]
 
-  # Single NAT gateway for cost efficiency
   enable_nat_gateway = true
   single_nat_gateway = true
 
-  public_subnet_tags = {
-    "kubernetes.io/role/elb" = "1"
-  }
+  public_subnet_tags = { "kubernetes.io/role/elb" = "1" }
 
   private_subnet_tags = {
     "kubernetes.io/role/internal-elb" = "1"

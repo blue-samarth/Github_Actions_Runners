@@ -52,3 +52,8 @@ terraform.rc.json
 # .runner-work/
 *lock*
 *.pem
+
+# Local-only helper scripts (kept out of the repo; may contain account-specific values)
+establish_local_connection.sh
+validate_script.sh
+wtf.sh

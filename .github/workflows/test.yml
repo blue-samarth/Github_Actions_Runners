@@ -1,15 +1,11 @@
 # Will test the Craeted RUnners in the cluster
 name: Test GitHub Actions Runners
 
+# Manual-only: this targets the self-hosted scale set, which only exists when the
+# cluster is applied. Auto-triggers (push/PR) are disabled so the workflow never
+# hangs waiting for a runner when the cluster is torn down. Run it on demand after
+# `terraform apply`, or re-add the push/pull_request triggers once the fleet is live.
 on:
-  push:
-    branches:
-      - main
-      - init-runner
-  pull_request:
-    branches:
-      - main
-
   workflow_dispatch:
 
 jobs:

@@ -1,13 +1,8 @@
-# Resolve the latest Karpenter release at plan time (see local.karpenter_version).
+resource "aws_iam_service_linked_role" "spot" { aws_service_name = "spot.amazonaws.com" }
 data "http" "karpenter_latest_release" {
-  url = "https://api.github.com/repos/aws/karpenter-provider-aws/releases/latest"
-  request_headers = {
-    Accept = "application/vnd.github+json"
-  }
+  url             = "https://api.github.com/repos/aws/karpenter-provider-aws/releases/latest"
+  request_headers = { Accept = "application/vnd.github+json" }
 }
-
-# Controller IAM role (Pod Identity), node IAM role + instance profile, and the
-# SQS interruption queue with its EventBridge rules.
 module "karpenter" {
   source  = "terraform-aws-modules/eks/aws//modules/karpenter"
   version = "21.8.0"
@@ -27,8 +22,6 @@ module "karpenter" {
     team  = "Devops:blue-samarth"
   }
 }
-
-# CRDs are managed by the dedicated chart so they upgrade cleanly with the controller.
 resource "helm_release" "karpenter_crd" {
   name             = lower(join("-", [local.short_name, "karpenter", "crd"]))
   repository       = "oci://public.ecr.aws/karpenter"
@@ -80,8 +73,6 @@ resource "helm_release" "karpenter" {
       name  = "controller.resources.limits.memory"
       value = "512Mi"
     },
-    # Pin the controller to the base node group and tolerate its taint so Karpenter
-    # never runs on (and can't consolidate) a node it manages.
     {
       name  = "nodeSelector.workload"
       value = "system"
@@ -104,8 +95,6 @@ resource "helm_release" "karpenter" {
     helm_release.karpenter_crd
   ]
 }
-
-# Defines how Karpenter launches EC2 nodes (AMI, role, subnet/SG discovery).
 resource "kubectl_manifest" "karpenter_node_class" {
   yaml_body = yamlencode({
     apiVersion = "karpenter.k8s.aws/v1"
@@ -134,8 +123,6 @@ resource "kubectl_manifest" "karpenter_node_class" {
 
   depends_on = [helm_release.karpenter]
 }
-
-# Constrains what Karpenter may provision and when it consolidates.
 resource "kubectl_manifest" "karpenter_node_pool" {
   yaml_body = yamlencode({
     apiVersion = "karpenter.sh/v1"
