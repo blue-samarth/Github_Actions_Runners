@@ -3,7 +3,7 @@ resource "helm_release" "arc_controller" {
   repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
   chart            = "gha-runner-scale-set-controller"
   version          = "0.12.0"
-  namespace        = "arc-runners"
+  namespace        = "arc-systems"
   create_namespace = true
 
   wait    = true
@@ -56,44 +56,62 @@ resource "helm_release" "arc_runner_scale_set" {
     # Runner Container Configuration
     {
       name  = "template.spec.containers[0].image"
-      value = "ghcr.io/actions/actions-runner:latest"
+      value = local.runner_image
+    },
+
+    # Required: overriding containers[0] replaces the chart's default container
+    # (Helm replaces lists wholesale), so we must re-supply the runner entrypoint.
+    {
+      name  = "template.spec.containers[0].command[0]"
+      value = "/home/runner/run.sh"
     },
 
     {
       name  = "template.spec.containers[0].resources.limits.cpu"
-      value = local.runner_controller_resources_limits_cpu
+      value = local.runner_deployment_resources_limits_cpu
     },
 
     {
       name  = "template.spec.containers[0].resources.limits.memory"
-      value = local.runner_controller_resources_limits_memory
+      value = local.runner_deployment_resources_limits_memory
     },
 
     {
       name  = "template.spec.containers[0].resources.requests.cpu"
-      value = local.runner_controller_resources_requests_cpu
+      value = local.runner_deployment_resources_requests_cpu
     },
 
     {
       name  = "template.spec.containers[0].resources.requests.memory"
-      value = local.runner_controller_resources_requests_memory
+      value = local.runner_deployment_resources_requests_memory
     },
 
     # Docker-in-Docker Mode
+
+    # And reference the controller properly
     {
-      name  = "containerMode.type"
-      value = "dind"
+      name  = "controllerServiceAccount.namespace"
+      value = "arc-systems"
     },
     {
-      name  = "runnerScaleSetListener.enabled"
-      value = "true"
+      name  = "runnerScaleSetName"
+      value = lower(join("-", [local.short_name, "scale", "set"]))
     },
+    {
+      name  = "template.spec.restartPolicy"
+      value = "Never"
+    },
+    {
+      name  = "controllerServiceAccount.name"
+      value = lower(join("-", [local.short_name, "arc", "controller", "gha-rs-controller"]))
+    }
   ]
   wait    = true
   timeout = 600
 
   depends_on = [
     helm_release.arc_controller,
-    kubernetes_namespace_v1.namespace_arc_runners
+    kubernetes_namespace_v1.namespace_arc_runners,
+    kubernetes_namespace_v1.namespace_arc_systems
   ]
 }

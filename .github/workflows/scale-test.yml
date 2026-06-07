@@ -1,0 +1,19 @@
+# Drives 10 concurrent jobs to exercise ARC runner scaling + Karpenter node scaling.
+name: Scale Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  load:
+    runs-on: gha-runner-scale-set
+    strategy:
+      fail-fast: false
+      matrix:
+        instance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    steps:
+      - name: Identify
+        run: |
+          echo "Job ${{ matrix.instance }} on pod $(hostname)"
+      - name: Hold to force concurrency
+        run: sleep 180

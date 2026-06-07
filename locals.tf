@@ -1,6 +1,7 @@
 locals {
   namespace          = coalesce(var.namespace, "runner")
   short_name         = coalesce(var.short_name, "gha-runner")
+  cluster_name       = lower(join("-", [local.short_name, "eks"]))
   region             = coalesce(var.region, "ap-south-1")
   availability_zones = coalesce(var.availability_zones, ["ap-south-1a", "ap-south-1b", "ap-south-1c"])
   cidr               = coalesce(var.cidr, "10.0.0.0/16")
@@ -16,28 +17,35 @@ locals {
     try(file("./github-app-private-key.pem"), "")
   )
 
-  Sync_period_in_minutes = coalesce(var.Sync_period_in_minutes, "1m")
-
   runner_controller_resources_limits_cpu      = coalesce(var.runner_controller_resources_limits_cpu, "500m")
   runner_controller_resources_limits_memory   = coalesce(var.runner_controller_resources_limits_memory, "512Mi")
   runner_controller_resources_requests_cpu    = coalesce(var.runner_controller_resources_requests_cpu, "250m")
   runner_controller_resources_requests_memory = coalesce(var.runner_controller_resources_requests_memory, "256Mi")
 
-  runner_image                 = coalesce(var.runner_image, "myoung34/github-runner:latest")
-  runner_labels                = coalesce(var.runner_labels, ["self-hosted", "linux", "x64", "k8s"])
-  min_runner_replicas          = coalesce(var.min_runner_replicas, 1)
-  max_runner_replicas          = coalesce(var.max_runner_replicas, 5)
-  desired_size_runner_replicas = coalesce(var.desired_size_runner_replicas, 2)
+  # Use :latest — GitHub force-rejects deprecated runner versions ("cannot receive
+  # messages", HTTP 403), and ARC runs with DisableUpdate=true so the runner can't
+  # self-update. A stale pin will break; override var.runner_image only with a CURRENT tag.
+  runner_image        = coalesce(var.runner_image, "ghcr.io/actions/actions-runner:latest")
+  min_runner_replicas = coalesce(var.min_runner_replicas, 1)
+  max_runner_replicas = coalesce(var.max_runner_replicas, 5)
 
   runner_deployment_resources_limits_cpu      = coalesce(var.runner_deployment_resources_limits_cpu, "1000m")
   runner_deployment_resources_limits_memory   = coalesce(var.runner_deployment_resources_limits_memory, "2Gi")
   runner_deployment_resources_requests_cpu    = coalesce(var.runner_deployment_resources_requests_cpu, "500m")
   runner_deployment_resources_requests_memory = coalesce(var.runner_deployment_resources_requests_memory, "1Gi")
 
-  runner_autoscaler_scale_up_threshold   = coalesce(var.runner_autoscaler_scale_up_threshold, "0.75")
-  runner_autoscaler_scale_down_threshold = coalesce(var.runner_autoscaler_scale_down_threshold, "0.25")
-  runner_autoscaler_scale_up_factor      = coalesce(var.runner_autoscaler_scale_up_factor, "2")
-  runner_autoscaler_scale_down_factor    = coalesce(var.runner_autoscaler_scale_down_factor, "0.5")
+  karpenter_version             = coalesce(var.karpenter_version, trimprefix(jsondecode(data.http.karpenter_latest_release.response_body).tag_name, "v"))
+  karpenter_namespace           = coalesce(var.karpenter_namespace, "karpenter")
+  karpenter_node_instance_types = coalesce(var.karpenter_node_instance_types, ["t3.medium", "t3.large", "t3.xlarge", "t3a.medium", "t3a.large", "t3a.xlarge"])
+  karpenter_capacity_types      = coalesce(var.karpenter_capacity_types, ["spot", "on-demand"])
+  karpenter_cpu_limit           = coalesce(var.karpenter_cpu_limit, "100")
+
+  # Tiny fixed base node group — hosts only system add-ons + the Karpenter controller.
+  # Decoupled from runner counts; GHA runners run on Karpenter spot nodes instead.
+  system_node_instance_types = coalesce(var.system_node_instance_types, ["t3.medium"])
+  system_node_min_size       = coalesce(var.system_node_min_size, 1)
+  system_node_desired_size   = coalesce(var.system_node_desired_size, 2)
+  system_node_max_size       = coalesce(var.system_node_max_size, 2)
 }
 
 # output "debug_github_app_key_length" {
