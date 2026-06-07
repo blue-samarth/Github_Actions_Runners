@@ -40,24 +40,8 @@ locals {
   karpenter_capacity_types      = coalesce(var.karpenter_capacity_types, ["spot", "on-demand"])
   karpenter_cpu_limit           = coalesce(var.karpenter_cpu_limit, "100")
 
-  # Tiny fixed base node group — hosts only system add-ons + the Karpenter controller.
-  # Decoupled from runner counts; GHA runners run on Karpenter spot nodes instead.
   system_node_instance_types = coalesce(var.system_node_instance_types, ["t3.medium"])
   system_node_min_size       = coalesce(var.system_node_min_size, 1)
   system_node_desired_size   = coalesce(var.system_node_desired_size, 2)
   system_node_max_size       = coalesce(var.system_node_max_size, 2)
 }
-
-# output "debug_github_app_key_length" {
-#   value     = length(local.github_app_private_key)
-#   sensitive = false
-# }
-
-# output "debug_github_app_key_source" {
-#   value = var.github_app_private_key != null ? "from_variable" : (
-#     var.github_app_private_key_path != null && fileexists(var.github_app_private_key_path) ? "from_file_path" :
-#     fileexists("./github-app-private-key.pem") ? "from_default_path" :
-#     "NONE - KEY IS EMPTY!"
-#   )
-#   sensitive = false
-# }

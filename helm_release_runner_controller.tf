@@ -42,7 +42,6 @@ resource "helm_release" "arc_runner_scale_set" {
       name  = "githubConfigSecret.github_app_private_key"
       value = local.github_app_private_key
     },
-    # Scaling Configuration
     {
       name  = "minRunners"
       value = local.min_runner_replicas
@@ -53,14 +52,11 @@ resource "helm_release" "arc_runner_scale_set" {
       value = local.max_runner_replicas
     },
 
-    # Runner Container Configuration
     {
       name  = "template.spec.containers[0].image"
       value = local.runner_image
     },
 
-    # Required: overriding containers[0] replaces the chart's default container
-    # (Helm replaces lists wholesale), so we must re-supply the runner entrypoint.
     {
       name  = "template.spec.containers[0].command[0]"
       value = "/home/runner/run.sh"
@@ -85,10 +81,6 @@ resource "helm_release" "arc_runner_scale_set" {
       name  = "template.spec.containers[0].resources.requests.memory"
       value = local.runner_deployment_resources_requests_memory
     },
-
-    # Docker-in-Docker Mode
-
-    # And reference the controller properly
     {
       name  = "controllerServiceAccount.namespace"
       value = "arc-systems"
