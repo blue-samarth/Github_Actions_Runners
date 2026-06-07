@@ -4,8 +4,7 @@ resource "kubernetes_namespace_v1" "namespace_arc_runners" {
   }
 
   depends_on = [
-    module.eks_cluster,
-    module.eks_cluster.aws_eks_addon
+    module.eks_cluster
   ]
 }
 
@@ -15,7 +14,6 @@ resource "kubernetes_namespace_v1" "namespace_arc_systems" {
   }
 
   depends_on = [
-    module.eks_cluster,
-    module.eks_cluster.aws_eks_addon
+    module.eks_cluster
   ]
 }

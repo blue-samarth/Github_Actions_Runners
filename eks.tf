@@ -5,8 +5,8 @@ module "eks_cluster" {
   source  = "terraform-aws-modules/eks/aws"
   version = "21.8.0"
 
-  name               = lower(join("-", [local.short_name, "eks"]))
-  kubernetes_version = "1.33"
+  name               = local.cluster_name
+  kubernetes_version = "1.36"
 
   enable_cluster_creator_admin_permissions = true
   endpoint_public_access                   = true
@@ -14,9 +14,17 @@ module "eks_cluster" {
 
   addons = {
     coredns = {
-      before_compute    = true
-      most_recent       = true
-      resolve_conflicts = "OVERWRITE"
+      before_compute              = true
+      most_recent                 = true
+      resolve_conflicts_on_create = "OVERWRITE"
+      resolve_conflicts_on_update = "OVERWRITE"
+      # Tolerate the system-node taint so CoreDNS can run on the base group
+      # (critical when runners scale to zero and no Karpenter nodes exist).
+      configuration_values = jsonencode({
+        tolerations = [
+          { key = "CriticalAddonsOnly", operator = "Exists" }
+        ]
+      })
     }
     eks-pod-identity-agent = {
       before_compute = true
@@ -24,23 +32,40 @@ module "eks_cluster" {
     }
     kube-proxy = {}
     vpc-cni = {
-      before_compute    = true
-      most_recent       = true
-      resolve_conflicts = "OVERWRITE"
+      before_compute              = true
+      most_recent                 = true
+      resolve_conflicts_on_create = "OVERWRITE"
+      resolve_conflicts_on_update = "OVERWRITE"
     }
   }
 
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnets
+  vpc_id                   = module.vpc.vpc_id
+  subnet_ids               = module.vpc.private_subnets
+  node_security_group_tags = { "karpenter.sh/discovery" = local.cluster_name }
 
+  # Base/system node group. Tainted CriticalAddonsOnly so GHA runners never land
+  # here — they run on Karpenter spot nodes. Sized independently of runner counts.
+  # Key kept as "runners" to avoid a destroy/recreate of the live base node group.
   eks_managed_node_groups = {
     runners = {
       ami_type       = "AL2023_x86_64_STANDARD"
-      instance_types = ["t3.medium"]
+      instance_types = local.system_node_instance_types
 
-      min_size     = local.min_runner_replicas
-      max_size     = local.max_runner_replicas
-      desired_size = local.desired_size_runner_replicas
+      min_size     = local.system_node_min_size
+      max_size     = local.system_node_max_size
+      desired_size = local.system_node_desired_size
+
+      labels = {
+        workload = "system"
+      }
+
+      taints = {
+        system = {
+          key    = "CriticalAddonsOnly"
+          value  = "true"
+          effect = "NO_SCHEDULE"
+        }
+      }
 
       update_config = {
         max_unavailable_percentage = 33
@@ -53,12 +78,8 @@ module "eks_cluster" {
   }
 
   tags = {
-    Name  = lower(join("-", [local.short_name, "eks"]))
+    Name  = local.cluster_name
     Owner = "Terraform"
     team  = "Devops:blue-samarth"
   }
-}
-
-data "aws_eks_cluster_auth" "cluster" {
-  name = module.eks_cluster.cluster_name
 }
