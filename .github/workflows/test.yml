@@ -14,13 +14,10 @@ on:
 
 jobs:
     test-runners:
-        runs-on: [self-hosted, gha-runner-scale-set]
+        runs-on: gha-runner-scale-set
         steps:
         - name: Check Runner
           run: echo "Runner is working fine!"
-
-        - name: Check kubectl access
-          run: kubectl get pods -A
 
         - name: Run tests
           run: |
