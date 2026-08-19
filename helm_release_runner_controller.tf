@@ -13,12 +13,24 @@ resource "helm_release" "arc_controller" {
 }
 
 resource "helm_release" "arc_runner_scale_set" {
-  name             = lower(join("-", [local.short_name, "scale", "set"]))
+  for_each = local.runner_scale_sets
+
+  name             = each.value.name
   repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
   chart            = "gha-runner-scale-set"
   version          = "0.12.0"
   namespace        = kubernetes_namespace_v1.namespace_arc_runners.metadata[0].name
   create_namespace = false
+
+  values = [yamlencode({
+    template = {
+      spec = {
+        nodeSelector = {
+          "karpenter.sh/capacity-type" = each.value.capacity_type
+        }
+      }
+    }
+  })]
 
   set = [
     {
@@ -87,7 +99,7 @@ resource "helm_release" "arc_runner_scale_set" {
     },
     {
       name  = "runnerScaleSetName"
-      value = lower(join("-", [local.short_name, "scale", "set"]))
+      value = each.value.name
     },
     {
       name  = "template.spec.restartPolicy"

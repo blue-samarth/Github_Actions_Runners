@@ -22,6 +22,9 @@ variable "runner_controller_resources_limits_memory" { default = null }
 variable "runner_controller_resources_requests_cpu" { default = null }
 variable "runner_controller_resources_requests_memory" { default = null }
 
+variable "runner_scale_set_name_spot" { default = "self-hosted-spot-runner" }
+variable "runner_scale_set_name_on_demand" { default = "self-hosted-runner" }
+
 variable "runner_deployment_resources_limits_cpu" { default = null }
 variable "runner_deployment_resources_limits_memory" { default = null }
 variable "runner_deployment_resources_requests_cpu" { default = null }
@@ -30,8 +33,8 @@ variable "runner_deployment_resources_requests_memory" { default = null }
 variable "karpenter_version" { default = null }
 variable "karpenter_namespace" { default = null }
 variable "karpenter_node_instance_types" { default = null }
-variable "karpenter_capacity_types" { default = null }
 variable "karpenter_cpu_limit" { default = null }
+variable "karpenter_on_demand_cpu_limit" { default = null }
 
 variable "system_node_instance_types" { default = null }
 variable "system_node_min_size" { default = null }

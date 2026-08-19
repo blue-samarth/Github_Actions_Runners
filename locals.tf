@@ -26,6 +26,11 @@ locals {
   min_runner_replicas = coalesce(var.min_runner_replicas, 1)
   max_runner_replicas = coalesce(var.max_runner_replicas, 5)
 
+  runner_scale_sets = {
+    spot      = { name = var.runner_scale_set_name_spot, capacity_type = "spot" }
+    on_demand = { name = var.runner_scale_set_name_on_demand, capacity_type = "on-demand" }
+  }
+
   runner_deployment_resources_limits_cpu      = coalesce(var.runner_deployment_resources_limits_cpu, "1000m")
   runner_deployment_resources_limits_memory   = coalesce(var.runner_deployment_resources_limits_memory, "2Gi")
   runner_deployment_resources_requests_cpu    = coalesce(var.runner_deployment_resources_requests_cpu, "500m")
@@ -34,8 +39,27 @@ locals {
   karpenter_version             = coalesce(var.karpenter_version, trimprefix(jsondecode(data.http.karpenter_latest_release.response_body).tag_name, "v"))
   karpenter_namespace           = coalesce(var.karpenter_namespace, "karpenter")
   karpenter_node_instance_types = coalesce(var.karpenter_node_instance_types, ["t3.medium", "t3.large", "t3.xlarge", "t3a.medium", "t3a.large", "t3a.xlarge"])
-  karpenter_capacity_types      = coalesce(var.karpenter_capacity_types, ["spot", "on-demand"])
   karpenter_cpu_limit           = coalesce(var.karpenter_cpu_limit, "100")
+  karpenter_on_demand_cpu_limit = coalesce(var.karpenter_on_demand_cpu_limit, "20")
+
+  karpenter_node_pools = {
+    spot = {
+      name                 = "spot"
+      capacity_types       = ["spot"]
+      instance_types       = local.karpenter_node_instance_types
+      cpu_limit            = local.karpenter_cpu_limit
+      consolidation_policy = "WhenEmptyOrUnderutilized"
+      consolidate_after    = "30s"
+    }
+    on_demand = {
+      name                 = "on-demand"
+      capacity_types       = ["on-demand"]
+      instance_types       = local.karpenter_node_instance_types
+      cpu_limit            = local.karpenter_on_demand_cpu_limit
+      consolidation_policy = "WhenEmpty"
+      consolidate_after    = "5m"
+    }
+  }
 
   system_node_instance_types = coalesce(var.system_node_instance_types, ["t3.medium"])
   system_node_min_size       = coalesce(var.system_node_min_size, 1)
