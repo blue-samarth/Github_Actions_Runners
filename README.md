@@ -83,7 +83,7 @@ At a glance, four systems cooperate:
 │                                                                                    │
 │  ── Node topology ──────────────────────────────────────────────────────────────  │
 │   Managed node group  (key "runners" = system base)   Karpenter-managed nodes      │
-│   • on-demand, FIXED 1–2 × t3.medium                  • SPOT (fallback on-demand)   │
+│   • on-demand, FIXED 1–2 × t3.medium                  • NodePools: spot & on-demand │
 │   • taint: CriticalAddonsOnly=true:NoSchedule         • untainted                  │
 │   • label: workload=system                            • x86 only (t3 / t3a)        │
 │   • runs: CoreDNS, Karpenter, DaemonSets              • scale 0 → N → 0 on demand   │
@@ -112,7 +112,7 @@ At a glance, four systems cooperate:
 |---|---|
 | **ARC** | Actions Runner Controller — the Kubernetes operator that manages self-hosted runners. |
 | **`gha-runner-scale-set`** | ARC's modern architecture (replaces the legacy `RunnerDeployment` model). A "scale set" is a pool of identical ephemeral runners addressed by a single name. |
-| **Runner scale set name** | The unique label a job targets via `runs-on:`. Here it is **`gha-runner-scale-set`**. In this model it is the *only* label a runner has — there is no implicit `self-hosted` label. |
+| **Runner scale set name** | The unique label a job targets via `runs-on:`. Here there are two: **`self-hosted-spot-runner`** and **`self-hosted-runner`**. In this model it is the *only* label a runner has — there is no implicit `self-hosted` label. |
 | **Ephemeral runner** | A runner that registers, runs exactly **one** job, then de-registers and the pod terminates. |
 | **Listener** | A small pod (in `arc-systems`) that long-polls GitHub for job messages for one scale set and tells the controller how many runners to create. |
 | **JIT config** | "Just-in-time" runner configuration (a base64 blob of registration token + settings) the controller injects so a pod can register without a long-lived PAT. |
@@ -201,10 +201,18 @@ defined in `helm_release_runner_controller.tf`:
 
 1. **`gha-runner-scale-set-controller`** (ns `arc-systems`) — the operator. It reconciles the
    `AutoscalingRunnerSet` CRD and runs a **listener** pod per scale set.
-2. **`gha-runner-scale-set`** (ns `arc-runners`) — declares one scale set. Key values:
+2. **`gha-runner-scale-set`** (ns `arc-runners`) — one release per entry in
+   `local.runner_scale_sets`, via `for_each`. Two ship by default: **`self-hosted-spot-runner`**
+   and **`self-hosted-runner`**, identical apart from which Karpenter capacity type they land on.
+   Key values:
    - `githubConfigUrl = https://github.com/<owner>/<repo>` — what the runners register to.
    - `githubConfigSecret.{github_app_id,github_app_installation_id,github_app_private_key}` — App auth.
-   - `runnerScaleSetName = gha-runner-scale-set` — **the label jobs use in `runs-on:`**.
+   - `runnerScaleSetName` — **the label jobs use in `runs-on:`**. Set from the map entry, which is
+     also the Helm release name, so the two never drift apart.
+   - `template.spec.nodeSelector["karpenter.sh/capacity-type"]` — `spot` or `on-demand`. Karpenter
+     stamps this label on every node it launches, so the selector is what decides which capacity
+     type gets provisioned for that scale set. It goes in a `values` doc rather than `set` because
+     the dotted key would need escaping in Helm's `--set` parser.
    - `minRunners` / `maxRunners` — from `min/max_runner_replicas` (here **0 / 10**).
    - `template.spec.containers[0]` — the runner pod spec: `name=runner`,
      `image=ghcr.io/actions/actions-runner:latest`, **`command=["/home/runner/run.sh"]`** (must be
@@ -268,11 +276,26 @@ release version, so this drives both charts. Override `var.karpenter_version` to
 - `subnetSelectorTerms` / `securityGroupSelectorTerms` discover by the `karpenter.sh/discovery`
   tag set on private subnets and the node SG.
 
-**NodePool `default`** (the *what*):
-- `requirements`: `arch In [amd64]`, `os In [linux]`,
-  `capacity-type In [spot, on-demand]` (**spot-first**), `instance-type In [t3.*, t3a.*]`.
-- `limits.cpu = 100` — a hard guardrail on total provisioned vCPU.
-- `disruption: { consolidationPolicy: WhenEmptyOrUnderutilized, consolidateAfter: 30s }`.
+**NodePools `spot` and `on-demand`** (the *what*) — one per capacity type, driven by
+`local.karpenter_node_pools` and a `for_each`. Both share the `default` EC2NodeClass and the
+requirements `arch In [amd64]`, `os In [linux]`, `instance-type In [t3.*, t3a.*]`; they differ in:
+
+| | `spot` | `on-demand` |
+|---|---|---|
+| `capacity-type In` | `[spot]` | `[on-demand]` |
+| `limits.cpu` | `100` | `20` |
+| `consolidationPolicy` | `WhenEmptyOrUnderutilized` | `WhenEmpty` |
+| `consolidateAfter` | `30s` | `5m` |
+
+Splitting them costs nothing (a NodePool is just a CRD, and the pods are already segregated by
+capacity type) and buys two things a single pool can't give: **independent vCPU budgets**, so a
+burst on the spot lane can't exhaust the guardrail the on-demand lane needs, and **independent
+disruption policy**, so on-demand nodes are only consolidated once genuinely empty rather than
+repacked while a job is mid-run.
+
+Note that the runner pods pin their capacity type via `nodeSelector`, so there is **no automatic
+spot→on-demand fallback** — a job that asks for on-demand waits for on-demand. That is the
+tradeoff for making the choice explicit per job at the `runs-on:` level.
 - `expireAfter: 720h` — nodes are recycled after 30 days for freshness/patching.
 
 **Spot prerequisite:** the account must have the EC2 Spot **service-linked role**
@@ -328,7 +351,7 @@ the stable base via `nodeSelector` avoids self-disruption.
 A step-by-step trace, with the observable signals at each step:
 
 ```
-1. Workflow job queued (runs-on: gha-runner-scale-set)
+1. Workflow job queued (runs-on: self-hosted-spot-runner)
         │
 2. Listener (arc-systems) receives "Job assigned"     ── log: statistics{totalAssignedJobs:1}
         │
@@ -378,7 +401,7 @@ image (#8).
 ├── variables.tf                        # all inputs (default = null)
 ├── github.auto.tfvars                  # LOCAL, git-ignored overrides (App IDs, key path, runner counts)
 └── .github/workflows/
-    ├── test.yml                        # smoke test (runs-on: gha-runner-scale-set)
+    ├── test.yml                        # smoke test (runs-on: self-hosted-spot-runner)
     └── scale-test.yml                  # 10-way matrix load test
 ```
 
@@ -457,8 +480,8 @@ IAM/queue module, the CRD + controller Helm releases (with nodeSelector/tolerati
 | `karpenter_version` | **dynamic (latest)** | Resolved from GitHub releases; override to pin. |
 | `karpenter_namespace` | `karpenter` | Controller namespace. |
 | `karpenter_node_instance_types` | `t3.{medium,large,xlarge}` + `t3a.*` | x86 only. |
-| `karpenter_capacity_types` | `["spot","on-demand"]` | Spot-first, on-demand fallback. |
-| `karpenter_cpu_limit` | `100` | NodePool total vCPU cap. |
+| `karpenter_cpu_limit` | `100` | `spot` NodePool total vCPU cap. |
+| `karpenter_on_demand_cpu_limit` | `20` | `on-demand` NodePool total vCPU cap. |
 
 ---
 
@@ -530,9 +553,9 @@ max_runner_replicas = 10     # hard cap on concurrent runners
 # short_name = "gha-runner"   # cluster name becomes "<short_name>-eks"
 
 # ── OPTIONAL: Karpenter / cost knobs (defaults shown) ───────────────────────
-# karpenter_capacity_types      = ["spot", "on-demand"]   # spot-first, on-demand fallback
 # karpenter_node_instance_types = ["t3.medium", "t3.large", "t3.xlarge", "t3a.medium", "t3a.large", "t3a.xlarge"]
-# karpenter_cpu_limit           = "100"                   # NodePool total vCPU cap
+# karpenter_cpu_limit           = "100"                   # spot NodePool total vCPU cap
+# karpenter_on_demand_cpu_limit = "20"                    # on-demand NodePool total vCPU cap
 # karpenter_version             = null                    # null = latest release (resolved dynamically)
 
 # ── OPTIONAL: system/base node group (defaults shown) ───────────────────────
@@ -697,7 +720,7 @@ runners terminated and Karpenter consolidated the empty nodes away.
 
 | Lever | Where | Effect |
 |---|---|---|
-| **Spot-first** | `karpenter_capacity_types = ["spot","on-demand"]` | ~65–75% off runner compute; on-demand only if Spot is unavailable. |
+| **Spot by default** | `runs-on: self-hosted-spot-runner` targets the `spot` NodePool | ~65–75% off runner compute; jobs opt into `self-hosted-runner` only when they need on-demand. |
 | **Scale to zero** | `min_runner_replicas = 0` | No warm runner — and no node for it — between jobs. |
 | **Instance diversity + AMD** | `t3a.*` alongside `t3.*` | Bigger Spot pool (fewer interruptions, better price); t3a ~10% under t3. |
 | **Tainted system-only base** | `CriticalAddonsOnly` taint | All runner load forced onto Spot; base stays small & on-demand. |
@@ -807,10 +830,10 @@ call at apply time. Removed the now-unused data source. (See [3.3](#33-provider-
 
 ### 5. Jobs never picked up — `runs-on` label mismatch
 **Symptom:** "Waiting for a runner…"; `Requested labels: self-hosted`.
-**Cause:** `runs-on: [self-hosted, gha-runner-scale-set]`. In the scale-set model a runner has
+**Cause:** `runs-on: [self-hosted, self-hosted-spot-runner]`. In the scale-set model a runner has
 **only** the scale-set name as a label — there is no `self-hosted` label — so requiring both never
 matches.
-**Fix:** `runs-on: gha-runner-scale-set` (exactly the scale-set name).
+**Fix:** `runs-on: self-hosted-spot-runner` (exactly the scale-set name).
 
 ### 6. Local workflow edits had no effect
 **Cause:** GitHub runs the workflow from the **pushed commit**, not your working tree.
@@ -951,8 +974,10 @@ an unsupported version. Pin via `var.karpenter_version` if you need reproducibil
 unauthenticated GitHub API is rate-limited to 60 req/hr — supply a token in CI.)
 
 **Q: How do I add a second, differently-sized runner pool?**
-Add another `gha-runner-scale-set` Helm release with a new `runnerScaleSetName` and its own
-resources; optionally add a dedicated Karpenter NodePool with matching requirements.
+Add an entry to `local.runner_scale_sets` — the `for_each` on the Helm release produces a new
+scale set whose name is both the release name and the `runs-on:` label. If it needs different
+node characteristics, add a matching entry to `local.karpenter_node_pools` and point the scale
+set's `capacity_type` at it.
 
 **Q: How much does idle cost?**
 Roughly the fixed floor: EKS control plane + single NAT + ~2 base `t3.medium`. Runners and their

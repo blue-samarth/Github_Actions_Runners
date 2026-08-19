@@ -124,11 +124,13 @@ resource "kubectl_manifest" "karpenter_node_class" {
   depends_on = [helm_release.karpenter]
 }
 resource "kubectl_manifest" "karpenter_node_pool" {
+  for_each = local.karpenter_node_pools
+
   yaml_body = yamlencode({
     apiVersion = "karpenter.sh/v1"
     kind       = "NodePool"
     metadata = {
-      name = "default"
+      name = each.value.name
     }
     spec = {
       template = {
@@ -153,22 +155,22 @@ resource "kubectl_manifest" "karpenter_node_pool" {
             {
               key      = "karpenter.sh/capacity-type"
               operator = "In"
-              values   = local.karpenter_capacity_types
+              values   = each.value.capacity_types
             },
             {
               key      = "node.kubernetes.io/instance-type"
               operator = "In"
-              values   = local.karpenter_node_instance_types
+              values   = each.value.instance_types
             }
           ]
         }
       }
       limits = {
-        cpu = local.karpenter_cpu_limit
+        cpu = each.value.cpu_limit
       }
       disruption = {
-        consolidationPolicy = "WhenEmptyOrUnderutilized"
-        consolidateAfter    = "30s"
+        consolidationPolicy = each.value.consolidation_policy
+        consolidateAfter    = each.value.consolidate_after
       }
     }
   })
